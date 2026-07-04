@@ -16,7 +16,7 @@
 | `book/ch11-memory.md` | 第 11 章：记忆——跨会话学习 | 完成 | 已完成初译与技术审校 |
 | `book/ch12-extensibility.md` | 第 12 章：可扩展性——技能与钩子 | 完成 | 已完成初译与技术审校 |
 | `book/ch13-terminal-ui.md` | 第 13 章：终端 UI | 完成 | 已完成初译与技术审校 |
-| `book/ch14-input-interaction.md` | 第 14 章：输入与交互 | 未开始 |  |
+| `book/ch14-input-interaction.md` | 第 14 章：输入与交互 | 完成 | 已完成初译与技术审校 |
 | `book/ch15-mcp.md` | 第 15 章：MCP——通用工具协议 | 未开始 |  |
 | `book/ch16-remote.md` | 第 16 章：远程控制与云端执行 | 未开始 |  |
 | `book/ch17-performance.md` | 第 17 章：性能——每一毫秒和每一个 token 都重要 | 未开始 |  |
