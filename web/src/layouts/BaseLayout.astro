@@ -1,4 +1,5 @@
 ---
+import { ClientRouter } from 'astro:transitions';
 import SEO from '../components/SEO.astro';
 import '../styles/global.css';
 import '../styles/prose.css';
@@ -21,9 +22,10 @@ const base = rawBase.endsWith('/') ? rawBase : rawBase + '/';
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" type="image/svg+xml" href={`${base}favicon.svg`} />
     <SEO title={title} description={description} />
+    <ClientRouter fallback="swap" />
 
     <!-- Prevent flash of wrong theme -->
-    <script is:inline>
+    <script is:inline data-astro-rerun>
       (function() {
         const stored = localStorage.getItem('theme');
         const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;

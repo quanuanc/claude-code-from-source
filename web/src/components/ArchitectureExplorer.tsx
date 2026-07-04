@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { navigate } from "astro:transitions/client";
 import * as d3 from "d3";
 
 // --- Data ---
@@ -436,7 +437,7 @@ export default function ArchitectureExplorer({ className, lang = "en" }: Props) 
             : '/';
           const base = rawBase.endsWith("/") ? rawBase : rawBase + "/";
           const path = d.href.replace(/^\//, "");
-          window.location.href = base + (lang === "en" ? `en/${path}` : `zh-CN/${path}`);
+          navigate(base + (lang === "en" ? `en/${path}` : `zh-CN/${path}`));
         }
       });
 
