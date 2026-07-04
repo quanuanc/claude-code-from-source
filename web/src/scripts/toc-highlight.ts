@@ -1,16 +1,22 @@
-// Track which heading is currently in view and highlight in the TOC
-const tocLinks = document.querySelectorAll<HTMLAnchorElement>('[data-toc-link]');
-const headings: HTMLElement[] = [];
+let cleanup: (() => void) | null = null;
 
-for (const link of tocLinks) {
-  const id = link.getAttribute('href')?.slice(1);
-  if (id) {
-    const heading = document.getElementById(id);
-    if (heading) headings.push(heading);
+export function initTocHighlight() {
+  cleanup?.();
+  cleanup = null;
+
+  const tocLinks = document.querySelectorAll<HTMLAnchorElement>('[data-toc-link]');
+  const headings: HTMLElement[] = [];
+
+  for (const link of tocLinks) {
+    const id = link.getAttribute('href')?.slice(1);
+    if (id) {
+      const heading = document.getElementById(id);
+      if (heading) headings.push(heading);
+    }
   }
-}
 
-if (headings.length > 0) {
+  if (headings.length === 0) return;
+
   const observer = new IntersectionObserver(
     (entries) => {
       for (const entry of entries) {
@@ -34,4 +40,6 @@ if (headings.length > 0) {
   for (const heading of headings) {
     observer.observe(heading);
   }
+
+  cleanup = () => observer.disconnect();
 }

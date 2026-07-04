@@ -1,5 +1,4 @@
 ---
-import readingProgressScript from '../scripts/reading-progress.ts?url';
 ---
 
 <div class="fixed top-0 left-0 right-0 z-50 h-[3px] pointer-events-none">
@@ -10,4 +9,7 @@ import readingProgressScript from '../scripts/reading-progress.ts?url';
   />
 </div>
 
-<script src={readingProgressScript} data-astro-rerun></script>
+<script data-astro-rerun>
+  import { initReadingProgress } from '../scripts/reading-progress';
+  initReadingProgress();
+</script>

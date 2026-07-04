@@ -1,6 +1,5 @@
 ---
 import { type Lang, ui } from '../i18n';
-import tocHighlightScript from '../scripts/toc-highlight.ts?url';
 
 interface Heading {
   depth: number;
@@ -45,4 +44,7 @@ const tocHeadings = headings.filter(h => h.depth >= 2 && h.depth <= 3);
   </aside>
 )}
 
-<script src={tocHighlightScript} data-astro-rerun></script>
+<script data-astro-rerun>
+  import { initTocHighlight } from '../scripts/toc-highlight';
+  initTocHighlight();
+</script>

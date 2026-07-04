@@ -8,8 +8,6 @@ import ReadingProgress from '../components/ReadingProgress.astro';
 import InteractiveDiagrams from '../components/InteractiveDiagrams.astro';
 import { type ChapterConfig, type PartConfig, isFirstChapterOfPart } from '../book.config';
 import { type Lang, ui } from '../i18n';
-import copyCodeScript from '../scripts/copy-code.ts?url';
-import focusModeScript from '../scripts/focus-mode.ts?url';
 
 interface Heading {
   depth: number;
@@ -69,6 +67,12 @@ const showPartHeader = part && isFirstChapterOfPart(chapterNumber, lang);
   </div>
 
   <!-- Client-side scripts -->
-  <script src={copyCodeScript} data-astro-rerun></script>
-  <script src={focusModeScript} data-astro-rerun></script>
+  <script data-astro-rerun>
+    import { initCopyCodeButtons } from '../scripts/copy-code';
+    initCopyCodeButtons();
+  </script>
+  <script data-astro-rerun>
+    import { initFocusMode } from '../scripts/focus-mode';
+    initFocusMode();
+  </script>
 </BaseLayout>
