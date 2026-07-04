@@ -102,6 +102,7 @@
 | vim mode | vim 模式 | 保留 vim 小写。 |
 | cost tracking | 成本跟踪 |  |
 | telemetry | 遥测 |  |
+| watchdog | 看门狗 | 技术机制名可写作 Watchdog（看门狗）。 |
 
 ## 保持英文的名称
 
