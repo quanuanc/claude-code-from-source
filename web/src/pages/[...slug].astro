@@ -1,23 +1,40 @@
 ---
 import { getCollection, render } from 'astro:content';
 import ChapterLayout from '../layouts/ChapterLayout.astro';
-import { chapters, getPartForChapter, getAdjacentChapters, getChapterNumber } from '../book.config';
+import { getPartForChapter, getAdjacentChapters, getChapterNumber } from '../book.config';
+import { getChapters, type Lang } from '../i18n';
 
 export async function getStaticPaths() {
-  const entries = await getCollection('chapters');
-  return entries.map((entry) => ({
-    params: { slug: entry.id },
-    props: { entry },
-  }));
+  const enEntries = await getCollection('enChapters');
+  const zhEntries = await getCollection('zhChapters');
+
+  return [
+    // Backward-compatible English chapter URLs: /ch01-architecture/
+    ...enEntries.map((entry) => ({
+      params: { slug: entry.id },
+      props: { entry, lang: 'en' as Lang },
+    })),
+    // Explicit localized URLs: /en/ch01-architecture/
+    ...enEntries.map((entry) => ({
+      params: { slug: `en/${entry.id}` },
+      props: { entry, lang: 'en' as Lang },
+    })),
+    // Simplified Chinese URLs: /zh-CN/ch01-architecture/
+    ...zhEntries.map((entry) => ({
+      params: { slug: `zh-CN/${entry.id}` },
+      props: { entry, lang: 'zh-CN' as Lang },
+    })),
+  ];
 }
 
-const { entry } = Astro.props;
+const { entry, lang } = Astro.props;
 const { Content, headings } = await render(entry);
 
 const chapterNum = getChapterNumber(entry.id);
-const chapterMeta = chapters.find(c => c.number === chapterNum);
-const part = getPartForChapter(chapterNum);
-const { prev, next } = getAdjacentChapters(chapterNum);
+const langChapters = getChapters(lang);
+const chapterMeta = langChapters.find(c => c.number === chapterNum);
+const part = getPartForChapter(chapterNum, lang);
+const { prev, next } = getAdjacentChapters(chapterNum, lang);
 ---
 
 <ChapterLayout
@@ -29,6 +46,7 @@ const { prev, next } = getAdjacentChapters(chapterNum);
   prev={prev}
   next={next}
   part={part}
+  lang={lang}
 >
   <Content />
 </ChapterLayout>

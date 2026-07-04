@@ -1,8 +1,16 @@
 ---
 import ThemeToggle from './ThemeToggle.astro';
+import { languageLabels, languages, type Lang, ui, withBase } from '../i18n';
+
+interface Props {
+  lang?: Lang;
+  slug?: string;
+}
 
 const rawBase = import.meta.env.BASE_URL;
 const base = rawBase.endsWith('/') ? rawBase : rawBase + '/';
+const { lang = 'en', slug } = Astro.props;
+const t = ui[lang];
 ---
 
 <header class="sticky top-0 z-40 border-b border-[var(--color-border)] dark:border-[#333] bg-[var(--color-cream)]/95 dark:bg-[var(--color-charcoal)]/95 backdrop-blur-sm">
@@ -12,7 +20,7 @@ const base = rawBase.endsWith('/') ? rawBase : rawBase + '/';
       <button
         id="sidebar-toggle"
         type="button"
-        aria-label="Toggle navigation"
+        aria-label={t.toggleNavigation}
         class="lg:hidden p-2 -ml-2 rounded-lg hover:bg-[var(--color-beige)] dark:hover:bg-[var(--color-dark-surface)]"
       >
         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -20,7 +28,7 @@ const base = rawBase.endsWith('/') ? rawBase : rawBase + '/';
         </svg>
       </button>
 
-      <a href={base} class="flex items-center gap-2 text-[var(--color-charcoal)] dark:text-[var(--color-cream)] hover:text-[var(--color-terracotta)] transition-colors">
+      <a href={withBase(base, lang)} class="flex items-center gap-2 text-[var(--color-charcoal)] dark:text-[var(--color-cream)] hover:text-[var(--color-terracotta)] transition-colors">
         <span class="font-semibold text-sm tracking-tight">Claude Code from Source</span>
       </a>
     </div>
@@ -30,8 +38,8 @@ const base = rawBase.endsWith('/') ? rawBase : rawBase + '/';
       <button
         id="focus-toggle"
         type="button"
-        aria-label="Toggle focus mode"
-        title="Focus mode — hide sidebars"
+        aria-label={t.focusMode}
+        title={t.focusMode}
         class="hidden lg:flex p-2 rounded-lg text-[var(--color-charcoal)] dark:text-[var(--color-cream)] hover:bg-[var(--color-beige)] dark:hover:bg-[var(--color-dark-surface)] transition-colors"
       >
         <!-- Expand icon (shown when sidebars visible) -->
@@ -43,6 +51,24 @@ const base = rawBase.endsWith('/') ? rawBase : rawBase + '/';
           <path stroke-linecap="round" stroke-linejoin="round" d="M9 4v1M9 4H4m5 0L4 9m11-5v1m0-1h5m-5 0l5 5M9 20v-1m0 1H4m5 0l-5-5m11 5v-1m0 1h5m-5 0l5-5" />
         </svg>
       </button>
+
+      <div class="flex items-center gap-1 rounded-lg border border-[var(--color-border)] dark:border-[#333] p-0.5" aria-label={t.language}>
+        {languages.map((item) => (
+          <a
+            href={withBase(base, item, slug)}
+            hreflang={item}
+            class:list={[
+              'px-2 py-1 rounded-md text-xs font-medium transition-colors',
+              item === lang
+                ? 'bg-[var(--color-terracotta)] text-white'
+                : 'text-[var(--color-secondary)] dark:text-[var(--color-muted)] hover:text-[var(--color-charcoal)] dark:hover:text-[var(--color-cream)] hover:bg-[var(--color-beige)] dark:hover:bg-[var(--color-dark-surface)]',
+            ]}
+          >
+            {item === 'en' ? 'EN' : '简'}
+            <span class="sr-only"> {languageLabels[item]}</span>
+          </a>
+        ))}
+      </div>
 
       <a
         href="https://github.com/alejandrobalderas/claude-code-from-source"

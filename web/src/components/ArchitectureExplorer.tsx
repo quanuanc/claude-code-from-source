@@ -104,9 +104,10 @@ const links: GraphLink[] = [
 
 interface Props {
   className?: string;
+  lang?: "en" | "zh-CN";
 }
 
-export default function ArchitectureExplorer({ className }: Props) {
+export default function ArchitectureExplorer({ className, lang = "en" }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const simulationRef = useRef<d3.Simulation<GraphNode, GraphLink> | null>(
@@ -434,7 +435,8 @@ export default function ArchitectureExplorer({ className }: Props) {
             ? (import.meta as Record<string, Record<string, string>>).env.BASE_URL
             : '/';
           const base = rawBase.endsWith("/") ? rawBase : rawBase + "/";
-          window.location.href = base + d.href.replace(/^\//, "");
+          const path = d.href.replace(/^\//, "");
+          window.location.href = base + (lang === "en" ? `en/${path}` : `zh-CN/${path}`);
         }
       });
 

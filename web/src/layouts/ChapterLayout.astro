@@ -7,6 +7,9 @@ import ChapterNav from '../components/ChapterNav.astro';
 import ReadingProgress from '../components/ReadingProgress.astro';
 import InteractiveDiagrams from '../components/InteractiveDiagrams.astro';
 import { type ChapterConfig, type PartConfig, isFirstChapterOfPart } from '../book.config';
+import { type Lang, ui } from '../i18n';
+import copyCodeScript from '../scripts/copy-code.ts?url';
+import focusModeScript from '../scripts/focus-mode.ts?url';
 
 interface Heading {
   depth: number;
@@ -23,23 +26,31 @@ interface Props {
   prev: ChapterConfig | null;
   next: ChapterConfig | null;
   part: PartConfig | undefined;
+  lang?: Lang;
 }
 
-const { title, description, chapterNumber, slug, headings, prev, next, part } = Astro.props;
-const showPartHeader = part && isFirstChapterOfPart(chapterNumber);
+const { title, description, chapterNumber, slug, headings, prev, next, part, lang = 'en' } = Astro.props;
+const t = ui[lang];
+const showPartHeader = part && isFirstChapterOfPart(chapterNumber, lang);
 ---
 
-<BaseLayout title={`Ch ${chapterNumber}. ${title} | Claude Code from Source`} description={description}>
+<BaseLayout
+  title={`${lang === 'zh-CN' ? `第 ${chapterNumber} 章：${title}` : `Ch ${chapterNumber}. ${title}`} | Claude Code from Source`}
+  description={description}
+  lang={lang}
+>
   <ReadingProgress />
-  <Header />
+  <Header lang={lang} slug={slug} />
 
   <div id="chapter-layout" class="flex max-w-[90rem] mx-auto">
-    <Sidebar currentSlug={slug} />
+    <Sidebar currentSlug={slug} lang={lang} />
 
     <main class="flex-1 min-w-0 px-4 md:px-8 lg:px-12 py-8 transition-all duration-200">
       {showPartHeader && (
         <div class="mb-8 pb-6 border-b border-[var(--color-border)] dark:border-[#333]">
-          <p class="text-xs font-semibold uppercase tracking-wider text-[var(--color-terracotta)] mb-1">Part {part!.number}</p>
+          <p class="text-xs font-semibold uppercase tracking-wider text-[var(--color-terracotta)] mb-1">
+            {lang === 'zh-CN' ? `第 ${part!.number} 部` : `${t.partLabel} ${part!.number}`}
+          </p>
           <h2 class="text-2xl font-bold text-[var(--color-charcoal)] dark:text-[var(--color-cream)] font-[var(--font-serif)]">{part!.title}</h2>
           <p class="text-sm italic text-[var(--color-muted)] mt-2">{part!.epigraph}</p>
         </div>
@@ -51,13 +62,13 @@ const showPartHeader = part && isFirstChapterOfPart(chapterNumber);
 
       <InteractiveDiagrams chapterNumber={chapterNumber} />
 
-      <ChapterNav prev={prev} next={next} />
+      <ChapterNav prev={prev} next={next} lang={lang} />
     </main>
 
-    <TableOfContents headings={headings} />
+    <TableOfContents headings={headings} lang={lang} />
   </div>
 
   <!-- Client-side scripts -->
-  <script src="../scripts/copy-code.ts"></script>
-  <script src="../scripts/focus-mode.ts"></script>
+  <script src={copyCodeScript}></script>
+  <script src={focusModeScript}></script>
 </BaseLayout>

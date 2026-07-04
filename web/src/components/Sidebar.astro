@@ -1,19 +1,24 @@
 ---
-import { parts, chapters, getPartForChapter } from '../book.config';
+import { getPartForChapter } from '../book.config';
+import { getChapters, getParts, stripChapterPrefix, type Lang, ui, withBase } from '../i18n';
 
 interface Props {
   currentSlug?: string;
+  lang?: Lang;
 }
 
-const { currentSlug } = Astro.props;
+const { currentSlug, lang = 'en' } = Astro.props;
 const rawBase = import.meta.env.BASE_URL;
 const base = rawBase.endsWith('/') ? rawBase : rawBase + '/';
+const parts = getParts(lang);
+const chapters = getChapters(lang);
+const t = ui[lang];
 
 // Determine which part is currently active
 const currentChapterNum = currentSlug
   ? parseInt(currentSlug.match(/^ch(\d+)/)?.[1] || '0', 10)
   : 0;
-const currentPart = currentChapterNum ? getPartForChapter(currentChapterNum) : null;
+const currentPart = currentChapterNum ? getPartForChapter(currentChapterNum, lang) : null;
 ---
 
 <nav id="sidebar" class="hidden lg:block w-64 shrink-0">
@@ -28,7 +33,7 @@ const currentPart = currentChapterNum ? getPartForChapter(currentChapterNum) : n
             data-part-toggle={part.number}
             class="flex items-center justify-between w-full text-left text-xs font-semibold uppercase tracking-wider text-[var(--color-muted)] hover:text-[var(--color-terracotta)] transition-colors py-1"
           >
-            <span>Part {part.number}: {part.title}</span>
+            <span>{lang === 'zh-CN' ? `第 ${part.number} 部：${part.title}` : `${t.partLabel} ${part.number}: ${part.title}`}</span>
             <svg
               class:list={[
                 'w-3 h-3 transition-transform',
@@ -56,7 +61,7 @@ const currentPart = currentChapterNum ? getPartForChapter(currentChapterNum) : n
               return (
                 <li>
                   <a
-                    href={`${base}${ch.slug}/`}
+                    href={withBase(base, lang, ch.slug)}
                     class:list={[
                       'block py-1.5 px-3 rounded-md text-sm transition-colors',
                       isActive
@@ -65,7 +70,7 @@ const currentPart = currentChapterNum ? getPartForChapter(currentChapterNum) : n
                     ]}
                   >
                     <span class="text-xs text-[var(--color-muted)] mr-1.5">{ch.number}.</span>
-                    {ch.title.replace(/^(Chapter \d+:\s*)?/, '')}
+                    {stripChapterPrefix(ch.title)}
                   </a>
                 </li>
               );
@@ -88,7 +93,7 @@ const currentPart = currentChapterNum ? getPartForChapter(currentChapterNum) : n
       return (
         <div class="mb-4">
           <div class="text-xs font-semibold uppercase tracking-wider text-[var(--color-muted)] py-1">
-            Part {part.number}: {part.title}
+            {lang === 'zh-CN' ? `第 ${part.number} 部：${part.title}` : `${t.partLabel} ${part.number}: ${part.title}`}
           </div>
           <ul class="mt-1 space-y-0.5">
             {partChapters.map((ch) => {
@@ -96,7 +101,7 @@ const currentPart = currentChapterNum ? getPartForChapter(currentChapterNum) : n
               return (
                 <li>
                   <a
-                    href={`${base}${ch.slug}/`}
+                    href={withBase(base, lang, ch.slug)}
                     class:list={[
                       'block py-1.5 px-3 rounded-md text-sm transition-colors',
                       isActive

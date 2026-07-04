@@ -1,8 +1,12 @@
 import { defineCollection } from 'astro:content';
 import { glob } from 'astro/loaders';
 
-const chapters = defineCollection({
+const enChapters = defineCollection({
   loader: glob({ pattern: 'ch*.md', base: '../book' }),
 });
 
-export const collections = { chapters };
+const zhChapters = defineCollection({
+  loader: glob({ pattern: 'ch*.md', base: '../book-zh' }),
+});
+
+export const collections = { enChapters, zhChapters };
