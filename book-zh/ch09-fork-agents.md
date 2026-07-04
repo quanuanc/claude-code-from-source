@@ -1,61 +1,54 @@
-<!--
-Source: ../book/ch09-fork-agents.md
-Status: untranslated scaffold
-Chinese working title: 第 9 章：分叉智能体与提示缓存
-Translation notes: preserve code identifiers, paths, commands, TypeScript names, and Mermaid syntax.
--->
+# 第 9 章：分叉智能体与提示缓存
 
-# Chapter 9: Fork Agents and the Prompt Cache
+## 95% 的洞察
 
-## The Ninety-Five Percent Insight
+当父智能体并行派生五个子智能体时，每个子级 API 请求中的绝大部分内容都是相同的。系统提示相同。工具定义相同。对话历史相同。触发派生的 assistant message 相同。唯一不同的是最后的指令：“你处理数据库迁移”，“你写测试”，“你更新文档”。
 
-When a parent agent spawns five child agents in parallel, the overwhelming majority of each child's API request is identical. The system prompt is the same. The tool definitions are the same. The conversation history is the same. The assistant message that triggered the spawns is the same. The only thing that differs is the final directive: "you handle the database migration," "you write the tests," "you update the docs."
+在一次带有热对话的典型 fork 中，共享前缀可能有 80,000 token。每个子级自己的指令可能只有 200 token。这是 99.75% 的重叠。Anthropic 的提示缓存会对 cached input tokens 给出 90% 折扣。如果能让子级 2 到 5 的这 80,000 token 命中缓存，你就把这四个请求的输入成本削减了 90%。对父级来说，这就是同一次并行派发花 4 美元，还是花 0.50 美元的区别。
 
-On a typical fork with a warm conversation, the shared prefix might be 80,000 tokens. The per-child directive might be 200 tokens. That is 99.75% overlap. Anthropic's prompt cache gives a 90% discount on cached input tokens. If you can make those 80,000 tokens hit the cache for children 2 through 5, you just cut the input cost of those four requests by 90%. For the parent, this is the difference between spending $4 and spending $0.50 on the same parallel dispatch.
+问题在于，提示缓存是字节精确的。不是“足够相似”。不是“语义等价”。从系统提示的第一个字节，到每个子级内容开始分叉前的最后一个字节，必须逐字符完全匹配。多一个空格、工具定义重排、某个过期 feature flag 改变了系统提示片段——缓存就会未命中。整个前缀会以全价重新处理。
 
-The catch is that prompt caching is byte-exact. Not "similar enough." Not "semantically equivalent." The bytes must match, character for character, from the first byte of the system prompt through to the last byte before the per-child content diverges. One extra space, one reordered tool definition, one stale feature flag changing a system prompt fragment -- and the cache misses. The entire prefix is reprocessed at full price.
-
-Fork agents are Claude Code's answer to this constraint. They are not just a convenience for "spawn a child with context" -- they are a prompt cache exploitation mechanism disguised as an orchestration feature. Every design decision in the fork system traces back to one question: how do we guarantee byte-identical prefixes across parallel children?
+Fork agents 是 Claude Code 对这个约束的回答。它们不只是“带上下文派生子级”的便利功能——它们是伪装成编排功能的提示缓存利用机制。fork 系统中的每个设计决策都追溯到同一个问题：如何保证并行 children 之间的前缀字节完全相同？
 
 ---
 
-## What a Fork Child Inherits
+## Fork Child 继承什么
 
-A fork agent inherits four things from its parent, and it inherits them by reference or byte-exact copy, not by recomputation.
+Fork agent 从父级继承四样东西，而且是通过引用或字节精确拷贝继承，不是重新计算。
 
-**1. The system prompt.** Not regenerated -- threaded. The parent's already-rendered system prompt bytes are passed via `override.systemPrompt`, pulled from `toolUseContext.renderedSystemPrompt`. This is the exact string that was sent in the parent's most recent API call.
+**1. 系统提示。** 不是重新生成，而是穿透传递。父级已经渲染好的系统提示字节会通过 `override.systemPrompt` 传入，来源是 `toolUseContext.renderedSystemPrompt`。这是父级最近一次 API 调用中发送的精确字符串。
 
-**2. The tool definitions.** The fork agent definition declares `tools: ['*']`, but with the `useExactTools` flag set to true, the child receives the parent's assembled tool array directly. No filtering, no reordering, no re-serialization.
+**2. 工具定义。** fork agent definition 声明 `tools: ['*']`，但由于 `useExactTools` flag 设为 true，子级会直接接收父级已经组装好的工具数组。没有过滤，没有重排，没有重新序列化。
 
-**3. The conversation history.** Every message the parent has exchanged with the API -- user turns, assistant turns, tool calls, tool results -- is cloned into the child's context via `forkContextMessages`.
+**3. 对话历史。** 父级与 API 交换过的每条 message——user turns、assistant turns、tool calls、tool results——都会通过 `forkContextMessages` 克隆到子级上下文中。
 
-**4. The thinking configuration and model.** The fork definition specifies `model: 'inherit'`, which resolves to the parent's exact model. Same model means same tokenizer, same context window, same cache namespace.
+**4. Thinking 配置和模型。** fork definition 指定 `model: 'inherit'`，会解析为父级的精确模型。相同模型意味着相同 tokenizer、相同 context window、相同缓存命名空间。
 
-The fork agent definition itself is minimal -- almost a no-op:
+fork agent definition 本身是极简的——几乎是 no-op：
 
-The fork agent definition is deliberately minimal -- it inherits everything from the parent. It specifies all tools (`'*'`), inherits the parent's model, uses bubble mode for permissions (so prompts surface in the parent's terminal), and provides a no-op system prompt function that is never actually called -- the real prompt arrives via the override channel, already rendered and byte-stable.
+fork agent definition 被刻意设计得极简——它从父级继承一切。它指定所有工具（`'*'`），继承父级模型，使用 bubble mode 处理权限（让提示浮到父级终端），并提供一个永远不会真正调用的 no-op system prompt 函数——真正的 prompt 会通过 override channel 传入，已经渲染好且字节稳定。
 
 ---
 
-## The Byte-Identical Prefix Trick
+## 字节完全相同的前缀技巧
 
-The API request to Claude has a specific structure: system prompt, then tools, then messages. For the prompt cache to hit, every byte from the start of the request through to some prefix boundary must be identical across requests.
+发给 Claude 的 API 请求有特定结构：先是系统提示，然后是工具，然后是 messages。要命中提示缓存，从请求开头到某个前缀边界的每个字节都必须在多个请求之间完全相同。
 
-Fork agents achieve this by ensuring three layers are frozen:
+Fork agents 通过冻结三层来实现这一点：
 
-**Layer 1: System prompt via threading, not recomputation.**
+**第 1 层：通过穿透传递系统提示，而不是重新计算。**
 
-When the parent agent's system prompt was rendered for its last API call, the result was captured in `toolUseContext.renderedSystemPrompt`. This is the string after all dynamic interpolation -- GrowthBook feature flags, environment details, MCP server descriptions, skill content, CLAUDE.md files. The fork child receives this exact string.
+当父智能体为最近一次 API 调用渲染系统提示时，结果被捕获在 `toolUseContext.renderedSystemPrompt` 中。这是所有动态插值之后的字符串——GrowthBook feature flags、环境细节、MCP server descriptions、skill content、CLAUDE.md files。fork child 会收到这个精确字符串。
 
-Why not just call `getSystemPrompt()` again? Because system prompt generation is not pure. GrowthBook flags transition from cold to warm state as the SDK fetches remote config. A flag that returned `false` during the parent's first turn might return `true` by the time the fork child spins up. If the system prompt includes a conditional block gated by that flag, the re-rendered prompt diverges by even a single character. Cache busted. Full-price reprocessing of 80,000 tokens, times five children.
+为什么不直接再次调用 `getSystemPrompt()`？因为系统提示生成不是纯函数。GrowthBook flags 会随着 SDK 获取远程配置，从 cold 状态过渡到 warm 状态。某个在父级第一轮返回 `false` 的 flag，到 fork child 启动时可能返回 `true`。如果系统提示包含受该 flag gate 的条件块，重新渲染的 prompt 即使只差一个字符，也会让缓存失效。80,000 token 全价重处理，再乘以五个 children。
 
-Threading the rendered bytes eliminates this entire class of divergence.
+传递已经渲染好的字节，可以消除这一整类发散。
 
-**Layer 2: Tool definitions via exact passthrough.**
+**第 2 层：通过精确透传工具定义。**
 
-Normal sub-agents go through `resolveAgentTools()`, which filters the tool pool based on the agent definition's `tools` and `disallowedTools` arrays, applies permission mode differences, and potentially reorders tools. The resulting serialized tool array would differ from the parent's -- different subset, different order, different permission annotations.
+普通子智能体会经过 `resolveAgentTools()`，根据 agent definition 的 `tools` 和 `disallowedTools` 数组过滤工具池，应用权限模式差异，并可能重排工具。最终序列化出来的工具数组会与父级不同——不同子集、不同顺序、不同权限注解。
 
-Fork agents skip this entirely:
+Fork agents 完全跳过这个过程：
 
 ```typescript
 const resolvedTools = useExactTools
@@ -63,18 +56,18 @@ const resolvedTools = useExactTools
   : resolveAgentTools(agentDefinition, availableTools, isAsync).resolvedTools
 ```
 
-The `useExactTools` flag is set to true only on the fork path. The child gets the parent's tool pool as-is. Same tools, same order, same serialization. This includes keeping the Agent tool itself in the child's pool, even though the child is forbidden from using it -- removing it would change the tool array and bust the cache.
+`useExactTools` flag 只在 fork 路径上设为 true。子级原样获得父级工具池。相同工具，相同顺序，相同序列化。这包括把 Agent 工具本身保留在子级工具池中，尽管子级被禁止使用它——移除它会改变工具数组并击穿缓存。
 
-**Layer 3: Message array construction.**
+**第 3 层：Message array 构造。**
 
-This is where `buildForkedMessages()` does its careful work. The function constructs the final two messages that sit between the shared history and the per-child directive:
+这里是 `buildForkedMessages()` 精细工作的地方。这个函数会构造位于共享历史和每个子级指令之间的最后两条 messages：
 
-The `buildForkedMessages()` function constructs the final two messages that sit between the shared history and the per-child directive. The algorithm:
+`buildForkedMessages()` 函数构造位于共享历史和每个子级指令之间的最后两条 messages。算法如下：
 
-1. Clone the parent's assistant message (preserving all `tool_use` blocks with their original IDs).
-2. For each `tool_use` block, create a `tool_result` with a constant placeholder string (identical across all children).
-3. Build a single user message containing all the placeholder results followed by the per-child directive wrapped in the boilerplate tag.
-4. Return `[clonedAssistantMessage, userMessageWithPlaceholdersAndDirective]`.
+1. 克隆父级的 assistant message（保留所有 `tool_use` blocks 及其原始 ID）。
+2. 对每个 `tool_use` block，创建一个带常量 placeholder 字符串的 `tool_result`（所有 children 完全相同）。
+3. 构建一条 user message，包含所有 placeholder results，后面跟包在 boilerplate tag 中的 per-child directive。
+4. 返回 `[clonedAssistantMessage, userMessageWithPlaceholdersAndDirective]`。
 
 ```typescript
 // Pseudocode — illustrates the message construction
@@ -88,42 +81,42 @@ function buildChildMessages(directive, parentAssistant) {
 }
 ```
 
-The resulting message array for each child looks like:
+每个 child 的最终 message array 看起来像这样：
 
 ```
 [...shared_history, assistant(all_tool_uses), user(placeholder_results..., directive)]
 ```
 
-Every element before the directive is identical across children. The `FORK_PLACEHOLDER_RESULT` -- a constant string `'Fork started -- processing in background'` -- ensures even the tool result blocks are byte-identical. The `tool_use_id` values are identical because they reference the same assistant message. Only the final text block, containing the per-child directive, varies.
+directive 之前的每个元素都在 children 之间完全相同。`FORK_PLACEHOLDER_RESULT`——常量字符串 `'Fork started -- processing in background'`——确保连 tool result blocks 都字节完全相同。`tool_use_id` 值相同，因为它们引用同一条 assistant message。只有包含 per-child directive 的最终 text block 会变化。
 
-The cache boundary falls right before that final text block. Everything above it -- potentially tens of thousands of tokens of system prompt, tool definitions, conversation history, and placeholder results -- hits the cache at a 90% discount for every child after the first.
-
----
-
-## The Fork Boilerplate Tag
-
-Each child's directive is wrapped in a boilerplate XML tag that serves two purposes: it instructs the child on how to behave, and it acts as a marker for recursive fork detection.
-
-The boilerplate contains approximately 10 rules. The key ones:
-
-- **Override the parent's forking instruction.** The parent's system prompt says "default to forking" -- the boilerplate explicitly tells the child: "that instruction is for the parent. You ARE the fork. Do NOT spawn sub-agents."
-- **Execute silently, report once.** No conversational text between tool calls. Use tools directly, then produce a structured summary.
-- **Stay within scope.** The child must not expand beyond its directive.
-- **Structured output format.** The response must follow a Scope/Result/Key files/Files changed/Issues template that makes results easy for the parent to parse when multiple children report back simultaneously.
-
-Rule 1 is particularly interesting. The parent's system prompt -- which the fork child inherits verbatim for cache reasons -- contains instructions like "default to forking when you have parallel work." If the child followed that instruction, it would try to fork its own children, creating an infinite recursion of agents. The boilerplate explicitly overrides: "that instruction is for the parent. You ARE the fork."
-
-The structured output format (Scope/Result/Key files/Files changed/Issues) is not decorative. It constrains the child's output to factual reporting, which makes the results easier for the parent to parse and aggregate when five children report back simultaneously.
+缓存边界正好落在这个最终 text block 之前。它上面的所有内容——可能是数万 token 的系统提示、工具定义、对话历史和 placeholder results——都会在第一个 child 之后以 90% 折扣命中缓存。
 
 ---
 
-## Recursive Fork Prevention
+## Fork Boilerplate Tag
 
-The fork child keeps the Agent tool in its tool pool. It has to -- removing it would change the serialized tool array and bust the prompt cache. But if the child actually invokes the Agent tool without `subagent_type`, the fork path would trigger again, creating a grandchild fork. This grandchild would inherit an even larger context (parent + child conversation), spawn its own forks, and so on.
+每个 child 的 directive 都会包在一个 boilerplate XML tag 中，这个 tag 有两个目的：指示 child 如何行动，并充当递归 fork 检测标记。
 
-Two guards prevent this:
+boilerplate 包含大约 10 条规则。关键规则包括：
 
-**Primary guard: querySource check.** When a fork child is spawned, its `context.options.querySource` is set to `'agent:builtin:fork'`. The `call()` method checks this before allowing the fork path:
+- **覆盖父级的 forking 指令。** 父级系统提示说“默认 fork”——boilerplate 明确告诉 child：“那条指令是给父级的。你就是 fork。不要派生子智能体。”
+- **静默执行，只报告一次。** 工具调用之间不输出对话文本。直接使用工具，然后产出结构化 summary。
+- **保持范围。** child 不得超出自己的 directive。
+- **结构化输出格式。** 响应必须遵循 Scope/Result/Key files/Files changed/Issues 模板，让多个 children 同时回报时父级更容易解析结果。
+
+规则 1 尤其有趣。父级系统提示——fork child 为缓存原因逐字继承——包含类似“当有并行工作时默认 fork”的指令。如果 child 遵循那条指令，它会尝试 fork 自己的 children，创造无限递归的 agents。boilerplate 明确覆盖：“那条指令是给父级的。你就是 fork。”
+
+结构化输出格式（Scope/Result/Key files/Files changed/Issues）不是装饰。它把 child 的输出约束为事实报告，这让五个 children 同时回报时，父级更容易解析和聚合结果。
+
+---
+
+## 防止递归 Fork
+
+fork child 会保留工具池中的 Agent 工具。它必须这样做——移除它会改变序列化后的工具数组并击穿提示缓存。但如果 child 真的在不带 `subagent_type` 的情况下调用 Agent 工具，fork 路径就会再次触发，创建一个孙级 fork。这个孙级会继承更大的上下文（父级 + 子级对话），派生自己的 forks，如此循环。
+
+两个 guard 防止这种情况：
+
+**主 guard：querySource 检查。** 当 fork child 被派生时，它的 `context.options.querySource` 会设为 `'agent:builtin:fork'`。`call()` 方法在允许 fork 路径前会检查它：
 
 ```typescript
 // In AgentTool.call():
@@ -135,23 +128,23 @@ if (effectiveType === undefined) {
 }
 ```
 
-This is the fast path. It checks a single string in the options object.
+这是快速路径。它只检查 options 对象中的一个字符串。
 
-**Fallback guard: message scanning.** Fork prevention uses two guards: the `querySource` tag set at spawn time (the fast path -- a single string comparison), and a fallback that scans message history for the boilerplate XML tag. The fallback exists because the `querySource` survives autocompact, but in edge cases where it was not properly threaded, the message-scanning fallback catches the recursion. It is a belt-and-suspenders approach where the cost of the check (scanning messages) is trivial compared to the cost of accidental recursive forking (runaway API spend).
+**Fallback guard：message scanning。** fork prevention 使用两个 guard：派生时设置的 `querySource` tag（快速路径——单次字符串比较），以及扫描 message history 查找 boilerplate XML tag 的 fallback。fallback 存在是因为 `querySource` 会跨 autocompact 保留，但在没有正确穿透的边缘情况下，message-scanning fallback 可以捕获递归。这是一种腰带加吊带方案：检查成本（扫描 messages）与意外递归 fork 的成本（失控 API 花费）相比微不足道。
 
-Why the fallback? Because Claude Code has an autocompact feature that rewrites the message array when context gets too long. Autocompact can rewrite message content but preserves the `querySource` in options. In theory, `querySource` alone is sufficient. In practice, the message-scanning fallback catches edge cases where `querySource` was not properly threaded -- a belt-and-suspenders approach where the cost of the check (scanning messages) is trivial compared to the cost of accidental recursive forking (runaway API spend).
+为什么需要 fallback？因为 Claude Code 有 autocompact 功能，会在上下文过长时重写 message array。Autocompact 可以重写 message content，但会在 options 中保留 `querySource`。理论上，单靠 `querySource` 就足够。实践中，message-scanning fallback 会捕获 `querySource` 没有正确穿透的边缘情况——这是腰带加吊带方案，检查成本（扫描 messages）与意外递归 fork 的成本（失控 API 花费）相比微不足道。
 
 ---
 
-## The Sync-to-Async Transition
+## 从同步到异步的转换
 
-A fork child starts running in the foreground: its messages stream to the parent's terminal, and the parent blocks waiting for completion. But what if the child is taking too long? Claude Code allows mid-execution backgrounding -- the user (or an auto-timeout) can push a running foreground agent into the background without losing any work.
+fork child 一开始在前台运行：它的 messages 会流到父级终端，父级阻塞等待完成。但如果 child 耗时过长怎么办？Claude Code 允许执行中途后台化——用户（或自动超时）可以把正在运行的前台 agent 推到后台，而不丢失任何工作。
 
-The mechanism is surprisingly clean:
+机制出奇地干净：
 
-1. When a foreground agent is registered via `registerAgentForeground()`, a background signal promise is created.
+1. 当前台 agent 通过 `registerAgentForeground()` 注册时，会创建一个 background signal promise。
 
-2. The parent's sync loop races between the agent's message stream and the background signal:
+2. 父级的 sync loop 会在 agent message stream 和 background signal 之间 race：
 
 ```
 while (true) {
@@ -164,95 +157,95 @@ while (true) {
 }
 ```
 
-3. When the background signal fires, the foreground iterator is gracefully terminated via `iterator.return()`. This triggers the generator's `finally` block, which handles cleanup.
+3. 当 background signal 触发时，前台 iterator 会通过 `iterator.return()` 优雅终止。这会触发 generator 的 `finally` block，后者负责清理。
 
-4. A new `runAgent()` instance is spawned with `isAsync: true`, using the same agent ID and the message history accumulated so far. The agent continues from where it left off, now running in the background.
+4. 使用相同 agent ID 和目前累计的 message history，派生一个新的 `isAsync: true` 的 `runAgent()` 实例。agent 会从离开的地方继续，只是现在在后台运行。
 
-5. The original synchronous `call()` returns `{ status: 'async_launched' }`, and the parent continues its conversation.
+5. 原始同步 `call()` 返回 `{ status: 'async_launched' }`，父级继续自己的对话。
 
-No work is lost because the message history is the agent's state. The sidechain transcript on disk has every message the agent has produced. The new async instance replays from this transcript and picks up where the sync instance stopped.
-
----
-
-## Auto-Backgrounding
-
-When the `CLAUDE_AUTO_BACKGROUND_TASKS` environment variable or the `tengu_auto_background_agents` GrowthBook flag is enabled, foreground agents are automatically backgrounded after 120 seconds:
-
-When enabled via environment variable or feature flag, foreground agents are automatically backgrounded after 120 seconds. When disabled, the function returns 0 (no auto-backgrounding).
-
-This is a UX decision with cost implications. A foreground agent blocks the parent terminal -- the user cannot type, cannot issue new instructions, cannot spawn other agents. Two minutes is long enough for the agent to complete most quick tasks synchronously (where the streaming output is useful feedback), but short enough that long-running tasks do not hold the terminal hostage.
-
-Under the fork experiment, the auto-backgrounding question is moot: all fork spawns are forced async from the start. The `run_in_background` parameter is hidden from the schema entirely. Every fork child runs in the background, reports back via a `<task-notification>` when done, and the parent never blocks.
+不会丢失工作，因为 message history 就是 agent 的状态。磁盘上的 sidechain transcript 记录了 agent 已经产生的每条 message。新的 async instance 会从这个 transcript replay，并从 sync instance 停止的地方继续。
 
 ---
 
-## When Fork Is NOT Used
+## 自动后台化
 
-Fork is one of several orchestration modes, and it is deliberately excluded in three cases:
+当 `CLAUDE_AUTO_BACKGROUND_TASKS` 环境变量或 `tengu_auto_background_agents` GrowthBook flag 启用时，前台 agents 会在 120 秒后自动后台化：
 
-**Coordinator mode.** Coordinator mode and fork mode are mutually exclusive. A coordinator has a structured delegation model: it maintains a plan, assigns tasks to workers with explicit prompts, and tracks progress. Fork's "inherit everything" approach would undermine this. A forked coordinator would inherit the parent coordinator's system prompt (which says "you are the coordinator, delegate work"), and the child would try to orchestrate instead of execute. The `isForkSubagentEnabled()` function checks `isCoordinatorMode()` first and returns false if active.
+通过环境变量或 feature flag 启用时，前台 agents 会在 120 秒后自动后台化。禁用时，该函数返回 0（不自动后台化）。
 
-**Non-interactive sessions.** SDK and API consumers (`--print` mode, Claude Agent SDK) operate without a terminal. Fork's `permissionMode: 'bubble'` surfaces permission prompts to the parent terminal -- which does not exist in non-interactive mode. Rather than building a separate permission flow, the fork path is simply disabled. SDK consumers use explicit `subagent_type` selection instead.
+这是一个带成本含义的 UX 决策。前台 agent 会阻塞父级终端——用户不能输入，不能发出新指令，不能派生其他 agents。两分钟足够大多数快速任务同步完成（此时流式输出是有用反馈），又足够短，不至于让长时间任务劫持终端。
 
-**Explicit subagent_type.** When the model specifies a `subagent_type` (e.g., `"Explore"`, `"Plan"`, `"general-purpose"`), the fork path is not triggered. Fork only fires when `subagent_type` is omitted. This lets the model choose between "I want a specialized agent with its own system prompt and tool set" (explicit type) and "I want a context-inheriting clone of myself to handle this in parallel" (omitted type).
-
----
-
-## The Economics
-
-Consider a concrete scenario. A developer asks Claude Code to refactor a module. The parent agent analyzes the codebase, forms a plan, and dispatches five fork children in parallel: one to update the database schema, one to rewrite the service layer, one to update the router, one to fix the tests, and one to update the types.
-
-At this point in the conversation, the shared context is substantial:
-- System prompt: ~4,000 tokens
-- Tool definitions (40+ tools): ~12,000 tokens
-- Conversation history (analysis + planning): ~30,000 tokens
-- Assistant message with five tool_use blocks: ~2,000 tokens
-- Placeholder tool results: ~500 tokens
-
-Total shared prefix: ~48,500 tokens. Per-child directive: ~200 tokens.
-
-Without fork (five independent agents, each with fresh context and their own system prompt):
-- Each child processes its own system prompt + tools + task prompt
-- No cache sharing (different system prompts, different tool sets)
-- Cost: 5 x full input processing
-
-With fork (byte-identical prefixes):
-- Child 1: 48,700 tokens at full price (cache miss on first request)
-- Children 2-5: 48,500 tokens at 10% price (cache hit) + 200 tokens at full price each
-- Effective cost for children 2-5: ~4,850 + 200 = ~5,050 tokens equivalent each
-
-The savings scale with context size and child count. For a warm session with 100K tokens of history spawning 8 parallel forks, the cache savings can exceed 90% of what the input tokens would have cost without sharing.
-
-This is why every design decision in the fork system -- the threading instead of recomputation, the exact tool passthrough, the placeholder results, even keeping the Agent tool in the child's pool despite it being forbidden -- optimizes for one thing: byte-identical prefixes. Each decision trades a small amount of elegance or safety for a measurable reduction in API cost.
+在 fork experiment 下，自动后台化问题并不存在：所有 fork spawns 从一开始就被强制 async。`run_in_background` 参数会从 schema 中完全隐藏。每个 fork child 都在后台运行，完成时通过 `<task-notification>` 回报，父级永远不阻塞。
 
 ---
 
-## Design Tensions
+## 什么时候不使用 Fork
 
-The fork system makes explicit trade-offs that are worth understanding:
+Fork 是多种编排模式之一，并且在三种情况下被刻意排除：
 
-**Isolation vs. cache efficiency.** Fork children inherit everything, including conversation history that may be irrelevant to their task. A child rewriting tests does not need the 15 messages where the parent discussed database schema design. But including those messages is what makes the prefix identical. Stripping irrelevant history would save context window space at the cost of busting the cache. The design bet is that cache savings outweigh the context overhead.
+**Coordinator mode。** Coordinator mode 与 fork mode 互斥。coordinator 有结构化委派模型：它维护 plan，用显式 prompts 给 workers 分配任务，并跟踪进度。Fork 的“继承一切”方法会破坏这一点。forked coordinator 会继承父级 coordinator 的系统提示（它说“你是 coordinator，委派工作”），于是 child 会尝试编排而不是执行。`isForkSubagentEnabled()` 函数会先检查 `isCoordinatorMode()`，如果激活则返回 false。
 
-**Safety vs. cache efficiency.** The Agent tool stays in the fork child's tool pool even though the child must not use it. Removing it would be safer (the child cannot even attempt to fork), but would change the tool array serialization. The boilerplate tag and recursive fork guards are the compensating controls -- runtime prevention instead of static removal.
+**非交互式会话。** SDK 和 API consumers（`--print` mode、Claude Agent SDK）在没有终端的情况下运行。Fork 的 `permissionMode: 'bubble'` 会把权限提示浮到父级终端——但非交互模式没有终端。与其构建一套单独权限流，fork 路径直接禁用。SDK consumers 会改用显式 `subagent_type` 选择。
 
-**Simplicity vs. cache efficiency.** The placeholder tool results are a lie. The child sees `'Fork started -- processing in background'` for every tool_use block in the parent's assistant message, regardless of what those tool calls actually did. This is fine because the child's directive tells it what to do -- it does not need accurate tool results from the parent's dispatching turn. But it means the child's conversation history is technically incoherent. The placeholder is chosen for brevity and uniformity, not accuracy.
-
-Each of these trade-offs reflects the same priority: when you are paying per-token for API calls at scale, byte-identical prefixes are worth contorting the architecture around.
+**显式 subagent_type。** 当模型指定 `subagent_type`（例如 `"Explore"`、`"Plan"`、`"general-purpose"`）时，不会触发 fork 路径。Fork 只在省略 `subagent_type` 时触发。这让模型可以在两者之间选择：“我想要一个带自己系统提示和工具集合的专门 agent”（显式类型），或者“我想要一个继承我上下文的克隆来并行处理这件事”（省略类型）。
 
 ---
 
-## Apply This: Designing for Prompt Cache Efficiency
+## 经济学
 
-The fork agent pattern generalizes beyond Claude Code. Any system that dispatches multiple parallel LLM calls from the same context can benefit from cache-aware request construction. The principles:
+看一个具体场景。开发者让 Claude Code 重构一个模块。父智能体分析代码库、形成计划，并并行派发五个 fork children：一个更新数据库 schema，一个重写 service layer，一个更新 router，一个修复 tests，一个更新 types。
 
-**1. Thread rendered prompts, do not recompute.** If your system prompt includes any dynamic content -- feature flags, timestamps, user preferences, A/B test variants -- capture the rendered result and pass it to children by value. Recomputing risks divergence.
+此时对话中的共享上下文已经很可观：
+- 系统提示：约 4,000 token
+- 工具定义（40+ tools）：约 12,000 token
+- 对话历史（分析 + 计划）：约 30,000 token
+- 带五个 tool_use blocks 的 assistant message：约 2,000 token
+- Placeholder tool results：约 500 token
 
-**2. Freeze the tool array.** If your children need different tool sets, you are giving up cache sharing on the tools block. Consider keeping the full tool set and using runtime guards (like the fork boilerplate's "do not use Agent") instead of compile-time removal.
+共享前缀总计：约 48,500 token。每个 child 的 directive：约 200 token。
 
-**3. Maximize the shared prefix, minimize the per-child suffix.** Structure your message array so that everything shared comes first and per-child content is appended at the end. Interleaving shared and per-child content fragments the cache boundary.
+没有 fork（五个独立 agents，每个都有新上下文和自己的系统提示）：
+- 每个 child 处理自己的系统提示 + 工具 + 任务 prompt
+- 没有缓存共享（不同系统提示、不同工具集合）
+- 成本：5 x 完整输入处理
 
-**4. Use constant placeholders for variable content.** When the message structure requires responses to previous tool calls, use identical placeholder strings across all children rather than actual (divergent) results.
+使用 fork（字节完全相同的前缀）：
+- Child 1：48,700 token 全价（第一个请求缓存未命中）
+- Children 2-5：48,500 token 按 10% 价格（缓存命中）+ 每个 200 token 全价
+- Children 2-5 的有效成本：每个约 4,850 + 200 = 约 5,050 token 等价
 
-**5. Measure the break-even.** Cache sharing has overhead: larger context windows per child (they carry irrelevant history), runtime guards instead of static safety, architectural complexity. Calculate whether your parallelism pattern (how many children, how large the shared prefix) actually saves money after accounting for the extra context tokens.
+节省会随上下文大小和 child 数量放大。对于一个带 100K token 历史、派生 8 个并行 forks 的热会话，缓存节省可能超过没有共享时输入 token 成本的 90%。
 
-The fork agent system is, at its core, a prompt cache exploitation engine. It answers a question that every multi-agent system builder eventually faces: when the cache gives you a 90% discount on repeated prefixes, how far will you restructure your architecture to claim that discount? Claude Code's answer is: very far.
+这就是为什么 fork 系统中的每个设计决策——传递而非重新计算、精确工具透传、placeholder results，甚至在 child 工具池中保留被禁止使用的 Agent 工具——都为同一件事优化：字节完全相同的前缀。每个决策都用少量优雅性或安全性，换取可测量的 API 成本降低。
+
+---
+
+## 设计张力
+
+fork 系统做出了值得理解的显式取舍：
+
+**隔离 vs. 缓存效率。** Fork children 继承一切，包括可能与其任务无关的对话历史。一个重写 tests 的 child 不需要父级讨论数据库 schema 设计的 15 条 messages。但包含这些 messages 才能让前缀相同。剥离无关历史会节省 context window 空间，但代价是击穿缓存。设计押注是：缓存节省大于上下文开销。
+
+**安全 vs. 缓存效率。** Agent 工具会留在 fork child 的工具池中，尽管 child 不得使用它。移除它会更安全（child 甚至不能尝试 fork），但会改变工具数组序列化。boilerplate tag 和递归 fork guards 是补偿控制——用运行时防护代替静态移除。
+
+**简单性 vs. 缓存效率。** Placeholder tool results 是一种谎言。无论父级 assistant message 中那些 tool_use blocks 实际做了什么，child 都会看到每个 tool_use block 的结果是 `'Fork started -- processing in background'`。这没问题，因为 child 的 directive 告诉它该做什么——它不需要父级派发 turn 的准确工具结果。但这意味着 child 的对话历史在技术上不连贯。placeholder 的选择是为了简短和统一，而不是准确。
+
+这些取舍都体现了同一个优先级：当你在规模化地按 token 为 API 调用付费时，字节完全相同的前缀值得让架构围绕它扭曲。
+
+---
+
+## 应用到你的系统：为提示缓存效率而设计
+
+fork agent 模式可以推广到 Claude Code 之外。任何从同一上下文发起多个并行 LLM 调用的系统，都可以从 cache-aware request construction 中受益。原则如下：
+
+**1. 传递渲染后的 prompts，不要重新计算。** 如果你的系统提示包含任何动态内容——feature flags、timestamps、user preferences、A/B test variants——捕获渲染结果，并按值传给 children。重新计算有发散风险。
+
+**2. 冻结工具数组。** 如果 children 需要不同工具集合，你就在放弃 tools block 上的缓存共享。考虑保留完整工具集合，并用运行时 guards（例如 fork boilerplate 的“不要使用 Agent”）代替编译期移除。
+
+**3. 最大化共享前缀，最小化每个 child 的后缀。** 构造 message array 时，让所有共享内容先出现，per-child 内容追加在末尾。交错 shared 和 per-child content 会碎片化缓存边界。
+
+**4. 对变量内容使用常量 placeholders。** 当 message 结构要求对之前 tool calls 给出响应时，在所有 children 中使用相同 placeholder 字符串，而不是实际（会发散的）结果。
+
+**5. 测量盈亏平衡点。** 缓存共享有开销：每个 child 更大的 context window（携带无关历史）、运行时 guards 代替静态安全、架构复杂度。计算你的并行模式（多少 children、共享前缀多大）在计入额外上下文 token 后是否真的省钱。
+
+fork agent 系统本质上是一个提示缓存利用引擎。它回答了每个多智能体系统构建者最终都会面对的问题：当缓存对重复前缀给出 90% 折扣时，你愿意为了拿到这个折扣，在多大程度上重构架构？Claude Code 的答案是：很大程度。
