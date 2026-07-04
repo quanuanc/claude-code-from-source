@@ -7,7 +7,7 @@
 | `book/ch02-bootstrap.md` | 第 2 章：快速启动——引导流水线 | 完成 | 已完成初译与技术审校 |
 | `book/ch03-state.md` | 第 3 章：状态——双层架构 | 完成 | 已完成初译与技术审校；修正原文中过时的章节引用 |
 | `book/ch04-api-layer.md` | 第 4 章：与 Claude 对话——API 层 | 完成 | 已完成初译与技术审校；修正原文中过时的后续章节指向 |
-| `book/ch05-agent-loop.md` | 第 5 章：智能体循环 | 未开始 |  |
+| `book/ch05-agent-loop.md` | 第 5 章：智能体循环 | 完成 | 已完成初译与技术审校 |
 | `book/ch06-tools.md` | 第 6 章：工具——从定义到执行 | 未开始 |  |
 | `book/ch07-concurrency.md` | 第 7 章：并发工具执行 | 未开始 |  |
 | `book/ch08-sub-agents.md` | 第 8 章：派生子智能体 | 未开始 |  |
