@@ -19,5 +19,5 @@
 | `book/ch14-input-interaction.md` | 第 14 章：输入与交互 | 完成 | 已完成初译与技术审校 |
 | `book/ch15-mcp.md` | 第 15 章：MCP——通用工具协议 | 完成 | 已完成初译与技术审校 |
 | `book/ch16-remote.md` | 第 16 章：远程控制与云端执行 | 完成 | 已完成初译与技术审校 |
-| `book/ch17-performance.md` | 第 17 章：性能——每一毫秒和每一个 token 都重要 | 未开始 |  |
+| `book/ch17-performance.md` | 第 17 章：性能——每一毫秒和每一个 token 都重要 | 完成 | 已完成初译与技术审校 |
 | `book/ch18-epilogue.md` | 第 18 章：尾声——我们学到了什么 | 未开始 |  |
