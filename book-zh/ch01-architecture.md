@@ -38,7 +38,7 @@ graph TD
 
 **3. 任务**（`Task.ts`、`tasks/`）。任务是后台工作单元，主要形式是子智能体。它们遵循一个状态机：`pending -> running -> completed | failed | killed`。`AgentTool` 会派生一个新的 `query()` 生成器，它拥有自己的消息历史、工具集合和权限模式。任务赋予 Claude Code 递归能力：一个智能体可以委派给子智能体，而子智能体还可以继续委派。
 
-**4. 状态**（两层）。系统在两个层级维护状态。一个可变单例（`STATE`）保存大约 80 个会话级基础设施字段：工作目录、模型配置、成本跟踪、遥测计数器、会话 ID。它在启动时设置一次，之后直接变更——没有响应式。一个极简响应式存储（34 行，形状类似 Zustand）驱动 UI：消息、输入模式、工具审批、进度指示器。这种分离是刻意设计的：基础设施状态很少变化，不需要触发重新渲染；UI 状态频繁变化，而且必须触发重新渲染。第 3 章会深入讲解这种双层架构。
+**4. 状态**（两层）。系统在两个层级维护状态。一个可变单例（`STATE`）保存大约 80 个会话级基础设施字段：工作目录、模型配置、成本跟踪、遥测计数器、会话 ID。它在启动时设置一次，之后直接变更——没有响应式。一个极简响应式存储（34 行，Zustand 风格）驱动 UI：消息、输入模式、工具审批、进度指示器。这种分离是刻意设计的：基础设施状态很少变化，不需要触发重新渲染；UI 状态频繁变化，而且必须触发重新渲染。第 3 章会深入讲解这种双层架构。
 
 **5. 记忆**（`memdir/`）。这是智能体跨会话持久化的上下文。它分为三层：项目级（仓库中的 `CLAUDE.md` 文件）、用户级（`~/.claude/MEMORY.md`）和团队级（通过符号链接共享）。会话启动时，系统会扫描所有记忆文件，解析 frontmatter，然后由一个 LLM 选择哪些记忆与当前对话相关。记忆让 Claude Code 能够“记住”你的代码库约定、架构决策和调试历史。
 
@@ -60,9 +60,9 @@ sequenceDiagram
     participant R as 渲染器
 
     U->>Q: UserMessage
-    Q->>Q: Token 数量检查（必要时自动压缩）
+    Q->>Q: Token 计数检查（必要时自动压缩）
     Q->>M: callModel() 发起流式请求
-    M-->>Q: Tokens 流式返回
+    M-->>Q: Token 流式返回
     M-->>SE: 检测到 tool_use 块
     SE->>T: 提前启动并发安全工具
     T-->>SE: 结果（可能早于模型完成）
@@ -91,7 +91,7 @@ Claude Code 会在你的机器上运行任意 shell 命令。它会编辑你的�
 
 系统定义了七种权限模式，按权限从高到低排列：
 
-| Mode | 行为 |
+| 模式 | 行为 |
 |------|----------|
 | `bypassPermissions` | 全部允许。没有检查。仅用于内部/测试。 |
 | `dontAsk` | 全部允许，但仍会记录日志。不提示用户。 |
@@ -155,7 +155,7 @@ graph LR
 Claude Code 同时作为 Anthropic 内部工具和公开 npm 包发布。同一个代码库服务于这两种形态，通过编译期 feature flag 控制哪些内容会被包含进去。
 
 ```typescript
-// Conditional imports guarded by feature flags
+// 由 feature flag 保护的条件导入
 const reactiveCompact = feature('REACTIVE_COMPACT')
   ? require('./services/compact/reactiveCompact.js')
   : null
@@ -165,7 +165,7 @@ const reactiveCompact = feature('REACTIVE_COMPACT')
 
 这个模式是一致的：用顶层 `feature()` guard 包住一个 `require()` 调用。这里专门使用 `require()` 而不是 `import`，是因为当 guard 为 false 时，动态 `require()` 可以被 bundler 完全消除；而动态 `import()` 不行，因为它返回一个 Promise，bundler 必须保留它。
 
-这里有一个值得注意的讽刺点。早期 npm 发布包中的 source map 包含 `sourcesContent`——完整的原始 TypeScript 源码，包括仅供内部使用的代码路径。feature flag 成功剥离了运行时代码，却把源码留在了 source map 里。这就是 Claude Code 源码变得公开可读的原因。
+这里有一个值得注意的讽刺点。早期 npm 发布包中的 source map 文件包含 `sourcesContent`——完整的原始 TypeScript 源码，包括仅供内部使用的代码路径。feature flag 成功剥离了运行时代码，却把源码留在了 source map 文件里。这就是 Claude Code 源码变得公开可读的原因。
 
 ---
 
