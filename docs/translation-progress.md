@@ -10,7 +10,7 @@
 | `book/ch05-agent-loop.md` | 第 5 章：智能体循环 | 完成 | 已完成初译与技术审校 |
 | `book/ch06-tools.md` | 第 6 章：工具——从定义到执行 | 完成 | 已完成初译与技术审校 |
 | `book/ch07-concurrency.md` | 第 7 章：并发工具执行 | 完成 | 已完成初译与技术审校 |
-| `book/ch08-sub-agents.md` | 第 8 章：派生子智能体 | 未开始 |  |
+| `book/ch08-sub-agents.md` | 第 8 章：派生子智能体 | 完成 | 已完成初译与技术审校；修正运行时章节指向为第 10 章 |
 | `book/ch09-fork-agents.md` | 第 9 章：分叉智能体与提示缓存 | 未开始 |  |
 | `book/ch10-coordination.md` | 第 10 章：任务、协调与智能体集群 | 未开始 |  |
 | `book/ch11-memory.md` | 第 11 章：记忆——跨会话学习 | 未开始 |  |
