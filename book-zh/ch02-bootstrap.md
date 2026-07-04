@@ -1,55 +1,48 @@
-<!--
-Source: ../book/ch02-bootstrap.md
-Status: untranslated scaffold
-Chinese working title: 第 2 章：快速启动——引导流水线
-Translation notes: preserve code identifiers, paths, commands, TypeScript names, and Mermaid syntax.
--->
+# 第 2 章：快速启动——引导流水线
 
-# Chapter 2: Starting Fast -- The Bootstrap Pipeline
+如果说第 1 章给了你 Claude Code 架构的地图，那么本章给你的就是它抵达可工作状态所走的路线。六个抽象中的每个组件——查询循环、工具系统、状态层、钩子、记忆——都必须在用户看到光标之前完成初始化。留给这一切的预算是：300 毫秒。
 
-If Chapter 1 gave you the map of Claude Code's architecture, this chapter gives you the route it takes to reach a working state. Every component from the six abstractions -- the query loop, the tool system, the state layers, hooks, memory -- must be initialized before the user sees a cursor. The budget for all of it: 300 milliseconds.
+300 毫秒是人类把一个工具感知为“瞬时响应”的阈值。超过它，CLI 就会显得迟钝。如果超出很多，开发者就会停止使用它。本章中的所有设计，都是为了保持在这条线之下。
 
-Three hundred milliseconds is the threshold where humans perceive a tool as instant. Cross it, and the CLI feels sluggish. Miss it by a lot, and developers stop using it. Everything in this chapter exists to stay under that line.
+引导过程必须完成四件事：验证环境、建立安全边界、配置通信层，并渲染 UI。它必须在 300ms 内完成全部四件事。这里的架构洞察是：这四项工作可以部分重叠、谨慎排序，并被激进裁剪，从而塞进一个对如此复杂的系统而言近乎不可能的预算里。
 
-Bootstrap must accomplish four things: validate the environment, establish security boundaries, configure the communication layer, and render the UI. It must do all four in under 300ms. The architectural insight is that these four jobs can be partially overlapped, carefully ordered, and aggressively pruned to fit inside a budget that feels impossible for a system this complex.
-
-A note on methodology: the timestamps in this chapter are approximate, derived from the codebase's own profiling checkpoints. They represent typical warm-start timings on modern hardware. Cold starts are slower. The absolute numbers matter less than the relative structure: which operations overlap, which block, and which are deferred.
+关于方法论需要说明一点：本章中的时间戳都是近似值，来自代码库自身的 profiling 检查点。它们代表现代硬件上典型的热启动耗时。冷启动会更慢。绝对数字没有相对结构重要：哪些操作可以重叠，哪些操作会阻塞，哪些操作被延后。
 
 ---
 
-## The Shape of the Pipeline
+## 流水线的形状
 
-The startup pipeline lives in five files, executed in sequence. Each file narrows the scope of what the system needs to do next:
+启动流水线分布在五个文件中，并按顺序执行。每个文件都会收窄系统接下来需要做的事情范围：
 
 ```mermaid
 flowchart TD
-    CLI["cli.tsx<br/>Fast-path dispatch"] -->|not a fast path| Main["main.tsx<br/>Module-level I/O (subprocess, keychain)"]
-    Main --> Init["init.ts<br/>Parse args, trust boundary, init()"]
-    Init --> Setup["setup.ts<br/>Commands, agents, hooks, plugins"]
-    Setup --> Launch["replLauncher.ts<br/>Seven launch paths converge"]
-    Launch --> REPL["Running REPL"]
+    CLI["cli.tsx<br/>快速路径分发"] -->|不是快速路径| Main["main.tsx<br/>模块级 I/O（子进程、keychain）"]
+    Main --> Init["init.ts<br/>解析参数、信任边界、init()"]
+    Init --> Setup["setup.ts<br/>命令、智能体、钩子、插件"]
+    Setup --> Launch["replLauncher.ts<br/>七条启动路径汇合"]
+    Launch --> REPL["运行中的 REPL"]
 
     style CLI fill:#f9f,stroke:#333
     style REPL fill:#9f9,stroke:#333
 ```
 
-Each file does the minimum work necessary before passing control to the next. `cli.tsx` tries to exit before importing anything heavy. `main.tsx` fires slow operations as side effects during import evaluation. `init.ts` resolves configuration and establishes the trust boundary. `setup.ts` registers capabilities. `replLauncher.ts` picks the right entry point and starts the UI.
+每个文件都会在把控制权交给下一个文件之前，只做必要的最小工作。`cli.tsx` 会尝试在导入任何重型模块之前就退出。`main.tsx` 会在 import 求值期间，把慢操作作为副作用启动。`init.ts` 解析配置并建立信任边界。`setup.ts` 注册能力。`replLauncher.ts` 选择正确入口并启动 UI。
 
-Three parallelism strategies make this fast:
+有三种并行策略让这个过程保持快速：
 
-1. **Module-level subprocess dispatch.** Fire keychain and MDM reads as side effects *during import evaluation*. The subprocesses run while the remaining ~135ms of static imports load.
-2. **Promise parallelism in setup.** Socket binding, hook snapshotting, command loading, and agent definition loading all run concurrently.
-3. **Post-render deferred prefetches.** Everything the user does not need before typing their first message -- git status, model capabilities, AWS credentials -- runs after the prompt is visible.
+1. **模块级子进程分发。** 在 *import 求值期间*，把 keychain 和 MDM 读取作为副作用启动。子进程会在剩余约 135ms 的静态 import 加载期间运行。
+2. **setup 中的 Promise 并行。** socket 绑定、钩子快照、命令加载和智能体定义加载全部并发运行。
+3. **渲染后的延迟预取。** 用户在输入第一条消息之前不需要的所有东西——git status、模型能力、AWS 凭证——都在提示符可见之后再运行。
 
-A fourth strategy is less visible but equally important: **dynamic imports to defer module evaluation**. The codebase uses `await import('./module.js')` in at least a dozen places to avoid loading code until it is needed. OpenTelemetry (400KB + 700KB gRPC) loads only when telemetry initializes. React components load only when rendering. Each dynamic import trades cold-path latency (first use triggers module evaluation) for hot-path speed (startup does not pay for modules it might never use).
+第四种策略不那么显眼，但同样重要：**通过动态 import 延迟模块求值**。代码库至少在十几个地方使用 `await import('./module.js')`，避免在真正需要之前加载代码。OpenTelemetry（400KB + 700KB gRPC）只在遥测初始化时加载。React 组件只在渲染时加载。每个动态 import 都是在用冷路径延迟（首次使用会触发模块求值）换取热路径速度（启动时不为可能永远用不到的模块付费）。
 
 ---
 
-## Phase 0: Fast-Path Dispatch (cli.tsx)
+## 阶段 0：快速路径分发（cli.tsx）
 
-The first file the process enters, `cli.tsx`, has one job: determine whether the full bootstrap pipeline is needed at all. Many invocations -- `claude --version`, `claude --help`, `claude mcp list` -- need a specific answer and nothing else. Loading React, initializing telemetry, reading the keychain, and setting up the tool system would be pure waste.
+进程进入的第一个文件是 `cli.tsx`，它只有一个任务：判断是否真的需要完整的引导流水线。很多调用——`claude --version`、`claude --help`、`claude mcp list`——只需要一个特定答案，不需要其他任何东西。加载 React、初始化遥测、读取 keychain、设置工具系统，都是纯粹浪费。
 
-The pattern is: check `argv`, dynamically import only the handler you need, and exit before the rest of the system loads.
+这个模式是：检查 `argv`，只动态导入所需的 handler，然后在系统其他部分加载之前退出。
 
 ```typescript
 // Pseudocode for the fast-path pattern
@@ -60,17 +53,17 @@ if (args.length === 1 && args[0] === '--version') {
 }
 ```
 
-There are roughly a dozen fast paths covering version, help, configuration, MCP server management, and update checks. The specifics do not matter -- the pattern does. Each path dynamically imports exactly one module, calls one function, and exits. The rest of the codebase never loads.
+大约有十几条快速路径，覆盖版本、帮助、配置、MCP 服务器管理和更新检查。具体细节不重要——模式才重要。每条路径都只动态导入一个模块，调用一个函数，然后退出。代码库的其余部分根本不会加载。
 
-This is the first instance of a principle that recurs throughout bootstrap: **do less by knowing more about intent**. The argv array reveals the user's intent. If the intent is narrow, the execution path should be narrow too.
+这是一个会在整个引导过程中反复出现的原则的第一次体现：**通过更了解意图来少做事**。`argv` 数组揭示了用户意图。如果意图很窄，执行路径也应该很窄。
 
-If no fast path matches, `cli.tsx` falls through to the full `main.tsx` import, and the real startup begins.
+如果没有命中任何快速路径，`cli.tsx` 就会落入完整的 `main.tsx` import，真正的启动过程从这里开始。
 
 ---
 
-## Phase 1: Module-Level I/O (main.tsx)
+## 阶段 1：模块级 I/O（main.tsx）
 
-When `main.tsx` is imported, its module-level side effects fire during evaluation -- before any function in the file is called. This is the most performance-critical technique in the entire bootstrap:
+当 `main.tsx` 被导入时，它的模块级副作用会在求值期间触发——早于文件中任何函数被调用。这是整个引导过程中最关键的性能技术：
 
 ```typescript
 // These run at import time, not at call time
@@ -78,54 +71,54 @@ const mdmPromise = startMDMSubprocess()
 const keychainPromise = readKeychainCredentials()
 ```
 
-While the JavaScript engine evaluates the rest of `main.tsx` and its transitive imports (~138ms of module evaluation), these two promises are already in flight. The MDM (Mobile Device Management) subprocess checks organizational security policies. The keychain read fetches stored credentials. Both are I/O-bound operations that would otherwise serialize on the critical path.
+当 JavaScript 引擎继续求值 `main.tsx` 的其余部分及其传递 import（约 138ms 的模块求值）时，这两个 promise 已经在执行中。MDM（Mobile Device Management，移动设备管理）子进程检查组织安全策略。keychain 读取会获取已存储的凭证。二者都是 I/O 绑定操作，否则就会在关键路径上串行执行。
 
-The insight: module evaluation is not idle time -- it is time you can overlap with I/O. By the time `main.tsx`'s exported functions are first called, these promises are often already resolved.
+这里的洞察是：模块求值并不是空闲时间——你可以把它与 I/O 重叠起来。等到 `main.tsx` 导出的函数第一次被调用时，这些 promise 往往已经完成解析。
 
-This technique requires suppressing ESLint's top-level-await and side-effect-in-module-scope rules in the relevant files. The codebase has a custom ESLint rule specifically for `process.env` access patterns that allows controlled side effects at module scope while preventing uncontrolled ones elsewhere.
+这种技术要求在相关文件中压制 ESLint 的 top-level-await 和 side-effect-in-module-scope 规则。代码库有一条专门针对 `process.env` 访问模式的自定义 ESLint 规则，它允许在模块作用域中进行受控副作用，同时防止其他地方出现不受控副作用。
 
 ---
 
-## Phase 2: Parse and Trust (init.ts)
+## 阶段 2：解析与信任（init.ts）
 
-The `init()` function is memoized -- calling it multiple times is safe and returns the same result. This is important because multiple entry points (the REPL, print mode, SDK mode) may each call `init()`, and the memoization guarantees it runs exactly once.
+`init()` 函数经过了记忆化（memoization）处理——多次调用是安全的，并且会返回同一个结果。这一点很重要，因为多个入口点（REPL、print 模式、SDK 模式）都可能调用 `init()`，而记忆化保证它只会真正运行一次。
 
-The function resolves command-line arguments via Commander, loads configuration from multiple sources (global settings, project settings, environment variables), and then hits the most important boundary in the pipeline.
+这个函数通过 Commander 解析命令行参数，从多个来源加载配置（全局设置、项目设置、环境变量），然后抵达流水线中最重要的边界。
 
-### The Trust Boundary
+### 信任边界
 
-Before the trust boundary, the system operates in a restricted mode. After it, full capabilities are available. The boundary exists because Claude Code reads environment variables -- and environment variables can be poisoned.
+在信任边界之前，系统以受限模式运行。跨过边界之后，完整能力才可用。这个边界之所以存在，是因为 Claude Code 会读取环境变量——而环境变量可能被投毒。
 
 ```mermaid
 sequenceDiagram
-    participant S as System
-    participant T as Trust Dialog
-    participant U as User
+    participant S as 系统
+    participant T as 信任对话框
+    participant U as 用户
 
-    Note over S: Pre-Trust (Safe Only)
-    S->>S: TLS/CA certs
-    S->>S: Theme preferences
-    S->>S: Telemetry opt-out
-    S->>S: Config validation
+    Note over S: 信任前（仅安全操作）
+    S->>S: TLS/CA 证书
+    S->>S: 主题偏好
+    S->>S: 遥测 opt-out
+    S->>S: 配置验证
 
-    S->>T: Show trust prompt
-    T->>U: "Do you trust this directory?"
-    U->>T: Accept
+    S->>T: 显示信任提示
+    T->>U: "你信任这个目录吗？"
+    U->>T: 接受
 
-    Note over S: Post-Trust (Full Access)
-    S->>S: Read PATH, LD_PRELOAD, NODE_OPTIONS
-    S->>S: Execute git commands
-    S->>S: Load full env vars
-    S->>S: Reset feature flags
+    Note over S: 信任后（完整访问）
+    S->>S: 读取 PATH, LD_PRELOAD, NODE_OPTIONS
+    S->>S: 执行 git 命令
+    S->>S: 加载完整环境变量
+    S->>S: 重置 feature flags
 ```
 
-The trust boundary is not about the user trusting Claude Code. It is about Claude Code trusting the *environment*. A malicious `.bashrc` could set `LD_PRELOAD` to inject code into every subprocess. The trust dialog ensures the user explicitly consents to operating in a directory that may have been configured by someone else.
+信任边界并不是关于用户是否信任 Claude Code。它关心的是 Claude Code 是否信任 *环境*。恶意 `.bashrc` 可能设置 `LD_PRELOAD`，把代码注入到每个子进程中。信任对话框确保用户明确同意在一个可能由他人配置过的目录中运行。
 
-The system has ten distinct trust-sensitive operations. Before the user accepts the trust dialog, only safe operations run: TLS certificate configuration, theme preferences, telemetry opt-out. After trust, the system reads potentially dangerous environment variables (PATH, LD_PRELOAD, NODE_OPTIONS), executes git commands, and applies the full environment configuration.
+系统有十种不同的信任敏感操作。在用户接受信任对话框之前，只运行安全操作：TLS 证书配置、主题偏好、遥测 opt-out。信任之后，系统才会读取可能危险的环境变量（PATH、LD_PRELOAD、NODE_OPTIONS），执行 git 命令，并应用完整的环境配置。
 
-### The preAction Hook
+### preAction 钩子
 
-Commander's `preAction` hook is the architectural linchpin. Commander parses the command structure (flags, subcommands, positional arguments) *without* executing anything. The `preAction` hook fires after parsing but before the matched command handler runs:
+Commander 的 `preAction` 钩子是架构上的关键枢纽。Commander 会解析命令结构（flag、subcommand、位置参数），但 *不会* 执行任何东西。`preAction` 钩子会在解析完成之后、匹配到的命令 handler 运行之前触发：
 
 ```typescript
 program.hook('preAction', async (thisCommand) => {
@@ -133,128 +126,128 @@ program.hook('preAction', async (thisCommand) => {
 })
 ```
 
-This separation means fast-path commands (handled in `cli.tsx` before Commander loads) never pay the `init()` cost. Only commands that need the full environment trigger initialization.
+这种分离意味着，快速路径命令（在 Commander 加载之前就由 `cli.tsx` 处理）永远不需要支付 `init()` 的成本。只有需要完整环境的命令才会触发初始化。
 
 ---
 
-## Phase 3: Setup (setup.ts)
+## 阶段 3：设置（setup.ts）
 
-After `init()` completes, `setup()` registers all the capabilities the system needs:
+`init()` 完成后，`setup()` 会注册系统需要的所有能力：
 
 ```mermaid
 gantt
-    title Phase 3: Parallel Setup
+    title 阶段 3：并行设置
     dateFormat X
     axisFormat %Lms
 
-    section Sequential
-    Commands registration   :0, 5
-    section Parallel
-    Agent definitions      :5, 15
-    Hook registration      :5, 12
-    Plugin initialization  :5, 20
-    MCP server connections :5, 25
+    section 串行
+    命令注册   :0, 5
+    section 并行
+    智能体定义      :5, 15
+    钩子注册      :5, 12
+    插件初始化  :5, 20
+    MCP 服务器连接 :5, 25
 ```
 
-Commands, agents, hooks, and plugins all register in parallel where possible. The setup phase is where the system transitions from "I know my configuration" to "I have all my capabilities." After setup, every tool is registered, every hook is wired, and the system is ready to handle user input.
+命令、智能体、钩子和插件都会在可能的情况下并行注册。setup 阶段是系统从“我知道自己的配置”过渡到“我具备全部能力”的地方。setup 完成后，每个工具都已注册，每个钩子都已接线，系统已经准备好处理用户输入。
 
-Setup also handles the security hook snapshot. The hook configuration is read from disk once, frozen into an immutable snapshot, and used for the rest of the session. Later modifications to the hooks configuration file on disk are ignored. This prevents an attacker from modifying hook rules after the session starts -- the frozen snapshot is the only source of truth for permission decisions.
-
----
-
-## Phase 4: Launch (replLauncher.ts)
-
-Seven different code paths converge on `replLauncher.ts`: interactive REPL, print mode (`--print`), SDK mode, resume (`--resume`), continue (`--continue`), pipe mode, and headless. The launcher inspects the configuration produced by `init()` and dispatches to the right entry point.
-
-Two examples illustrate the range:
-
-**Interactive REPL** -- the standard case. The launcher mounts the React/Ink component tree, starts the terminal renderer, and enters the event loop. The user sees a prompt and can start typing.
-
-**Print mode** (`--print`) -- a single prompt from argv. The launcher creates a headless query loop with no React tree, runs it to completion, streams the output to stdout, and exits. Same agent loop, different presentation.
-
-The important detail: all seven paths eventually call `query()` -- the same agent loop from Chapter 1. The launch path determines *how* the loop is presented (interactive terminal, single-shot, SDK protocol), not *what* it does. This convergence is what makes the architecture testable and predictable: regardless of how the user invokes Claude Code, the core behavior is identical.
+setup 还会处理安全钩子快照。钩子配置会从磁盘读取一次，被冻结成不可变快照，并在会话剩余时间内使用。之后对磁盘上钩子配置文件的修改都会被忽略。这可以防止攻击者在会话启动后修改钩子规则——冻结快照才是权限决策的唯一真实来源。
 
 ---
 
-## The Startup Timeline
+## 阶段 4：启动（replLauncher.ts）
 
-Here is what the full pipeline looks like in time:
+七条不同的代码路径会汇合到 `replLauncher.ts`：交互式 REPL、print 模式（`--print`）、SDK 模式、resume（`--resume`）、continue（`--continue`）、pipe 模式和 headless。launcher 会检查 `init()` 产出的配置，并分发到正确的入口点。
+
+两个例子可以展示这个范围：
+
+**交互式 REPL**——标准情况。launcher 挂载 React/Ink 组件树，启动终端渲染器，并进入事件循环。用户看到提示符，随后可以开始输入。
+
+**Print 模式**（`--print`）——来自 argv 的单个提示。launcher 创建一个没有 React 树的 headless 查询循环，运行到完成，把输出流式写入 stdout，然后退出。同一个智能体循环，不同的呈现方式。
+
+重要细节是：七条路径最终都会调用 `query()`——也就是第 1 章中的同一个智能体循环。启动路径决定的是这个循环 *如何* 呈现（交互式终端、单次执行、SDK 协议），而不是它 *做什么*。这种汇合让架构变得可测试、可预测：无论用户如何调用 Claude Code，核心行为都是一样的。
+
+---
+
+## 启动时间线
+
+完整流水线在时间上大致如下：
 
 ```mermaid
 gantt
-    title Bootstrap Timeline (~240ms)
+    title 引导时间线（约 240ms）
     dateFormat X
     axisFormat %Lms
 
-    section Phase 0
-    Fast-path check          :0, 5
+    section 阶段 0
+    快速路径检查          :0, 5
 
-    section Phase 1
-    Module evaluation        :5, 143
-    MDM subprocess (parallel) :8, 60
-    Keychain read (parallel)  :8, 50
+    section 阶段 1
+    模块求值        :5, 143
+    MDM 子进程（并行） :8, 60
+    Keychain 读取（并行）  :8, 50
 
-    section Phase 2
-    Commander parse          :143, 146
+    section 阶段 2
+    Commander 解析          :143, 146
     init()                   :146, 160
-    Trust boundary           :160, 175
+    信任边界           :160, 175
 
-    section Phase 3
-    setup() + parallel registration :175, 210
+    section 阶段 3
+    setup() + 并行注册 :175, 210
 
-    section Phase 4
-    Launch path selection    :210, 215
-    First render             :215, 240
+    section 阶段 4
+    启动路径选择    :210, 215
+    首次渲染             :215, 240
 ```
 
-The critical path runs through module evaluation (the single longest phase at ~138ms), then Commander parse, init, and setup. The parallel I/O operations (MDM, keychain) overlap with module evaluation and are typically resolved before they are needed.
+关键路径经过模块求值（最长的单个阶段，约 138ms），然后是 Commander 解析、init 和 setup。并行 I/O 操作（MDM、keychain）与模块求值重叠，通常在真正需要它们之前就已经完成。
 
-### The Performance Budget
+### 性能预算
 
-| Phase | Time | What Happens |
+| 阶段 | 时间 | 发生了什么 |
 |-------|------|-------------|
-| Fast-path check | ~5ms | Check argv, exit early if possible |
-| Module evaluation | ~138ms | Import tree, fire parallel I/O |
-| Commander parse | ~3ms | Parse flags and subcommands |
-| init() | ~14ms | Config resolution, trust boundary |
-| setup() | ~35ms | Commands, agents, hooks, plugins |
-| Launch + first render | ~25ms | Pick path, mount React, first paint |
-| **Total** | **~240ms** | Under 300ms budget |
+| 快速路径检查 | ~5ms | 检查 argv，可能的话提前退出 |
+| 模块求值 | ~138ms | 导入树，触发并行 I/O |
+| Commander 解析 | ~3ms | 解析 flags 和 subcommands |
+| init() | ~14ms | 配置解析，信任边界 |
+| setup() | ~35ms | 命令、智能体、钩子、插件 |
+| 启动 + 首次渲染 | ~25ms | 选择路径，挂载 React，首次绘制 |
+| **合计** | **~240ms** | 低于 300ms 预算 |
 
-The total is approximately 240ms on a modern machine -- 60ms of headroom under the 300ms budget. Cold starts (first run after reboot, OS cache empty) can push module evaluation to 200ms+, bringing the total closer to the limit.
-
----
-
-## The Migration System
-
-A brief note on one subsystem that runs during init: schema migrations. Claude Code stores configuration and session data in local files and directories. When the format changes between versions, migrations run automatically at startup.
-
-Each migration is a function with a version number. The system checks the current schema version against the highest migration version, runs pending migrations in order, and updates the version. Migrations are idempotent and fast (operating on small local files, not databases). The entire migration pass typically completes in under 5ms. If a migration fails, it logs the error and continues -- availability beats strict consistency for local configuration.
+在现代机器上，总耗时约 240ms——比 300ms 预算多出 60ms 余量。冷启动（重启后的首次运行、OS 缓存为空）可能把模块求值推到 200ms+，让总耗时更接近上限。
 
 ---
 
-## What Startup Teaches About System Design
+## 迁移系统
 
-The bootstrap pipeline is a study in narrowing scopes. Each phase reduces the space of possibilities:
+简要说明 init 期间运行的一个子系统：schema migrations。Claude Code 会把配置和会话数据存储在本地文件和目录中。当版本之间的格式发生变化时，迁移会在启动时自动运行。
 
-- Phase 0 narrows from "any CLI invocation" to "needs full bootstrap"
-- Phase 1 narrows from "everything must load" to "load in parallel with I/O"
-- Phase 2 narrows from "unknown environment" to "trusted, configured environment"
-- Phase 3 narrows from "no capabilities" to "fully registered"
-- Phase 4 narrows from "seven possible modes" to "one concrete launch path"
-
-By the time the REPL renders, every decision has been made. The query loop receives a fully configured environment with no ambiguity about what mode it is in, which tools are available, or what permissions apply. The 300ms budget is not just a performance target -- it is a forcing function that prevents bootstrap from becoming a lazy initialization system where decisions are deferred and scattered throughout the codebase.
+每个 migration 都是一个带版本号的函数。系统会把当前 schema 版本与最高 migration 版本比较，按顺序运行待处理迁移，并更新版本。迁移是幂等且快速的（操作的是小型本地文件，而不是数据库）。完整迁移过程通常在 5ms 内完成。如果某个迁移失败，它会记录错误并继续——对本地配置来说，可用性优先于严格一致性。
 
 ---
 
-## Apply This
+## 启动过程教给我们的系统设计原则
 
-**Overlap I/O with initialization.** Fire slow operations (subprocess spawns, credential reads, network checks) at module evaluation time, before they are needed. The JavaScript engine is doing synchronous work anyway -- use that time for parallel I/O. The pattern: `const promise = startSlowThing()` at the top of the file, `await promise` at the point of use.
+引导流水线是一项关于收窄范围的研究。每个阶段都会减少可能性空间：
 
-**Narrow scope as early as possible.** The bootstrap pipeline's five files form a funnel: each phase eliminates work that subsequent phases do not need to do. Fast-path dispatch is the most dramatic example, but the principle applies everywhere. If you can determine at parse time that a code path is unnecessary, skip it.
+- 阶段 0 把“任意 CLI 调用”收窄为“需要完整引导”
+- 阶段 1 把“所有东西都必须加载”收窄为“在 I/O 期间并行加载”
+- 阶段 2 把“未知环境”收窄为“可信且已配置的环境”
+- 阶段 3 把“没有能力”收窄为“能力已完整注册”
+- 阶段 4 把“七种可能模式”收窄为“一条具体启动路径”
 
-**Establish trust boundaries explicitly.** If your application reads from an environment it does not control (environment variables, configuration files, shell settings), draw a clear line between "safe to read before the user consents" and "only read after consent." The trust boundary prevents a class of attacks where a malicious environment poisons the application before the user has a chance to evaluate it.
+到 REPL 渲染时，每个决策都已经完成。查询循环拿到的是一个完全配置好的环境：当前处于什么模式、有哪些工具可用、适用哪些权限，都没有歧义。300ms 预算不只是性能目标——它还是一种强约束，防止引导过程变成一个懒初始化系统，把决策推迟并散落到整个代码库中。
 
-**Memoize your init function.** Make initialization idempotent -- calling it twice produces the same result. This eliminates ordering bugs when multiple entry points may each trigger initialization. The memoization pattern is trivial but eliminates an entire class of double-initialization bugs.
+---
 
-**Capture early input before yielding.** In an event-driven system, user input that arrives during initialization can be lost. Claude Code captures the initial prompt from argv before any async work begins, ensuring that `claude "fix the bug"` does not drop the prompt if initialization takes longer than expected.
+## 应用到你的系统
+
+**把 I/O 与初始化重叠。** 在真正需要慢操作（派生子进程、读取凭证、网络检查）之前，就在模块求值时启动它们。JavaScript 引擎无论如何都在做同步工作——利用这段时间并行执行 I/O。模式是：在文件顶部写 `const promise = startSlowThing()`，在使用点写 `await promise`。
+
+**尽早收窄范围。** 引导流水线的五个文件形成一个漏斗：每个阶段都会消除后续阶段不需要做的工作。快速路径分发是最明显的例子，但这个原则适用于所有地方。如果你能在解析时判断某条代码路径不需要执行，就跳过它。
+
+**显式建立信任边界。** 如果你的应用会读取自己无法控制的环境（环境变量、配置文件、shell 设置），就在“用户同意之前可以安全读取”和“只有同意之后才能读取”之间画出一条清晰边界。信任边界可以阻止一类攻击：恶意环境在用户有机会评估之前就投毒应用。
+
+**记忆化你的 init 函数。** 让初始化幂等——调用两次会产生相同结果。当多个入口点都可能触发初始化时，这能消除顺序 bug。memoization 模式本身很简单，但可以消除整整一类重复初始化 bug。
+
+**在让出控制权之前捕获早期输入。** 在事件驱动系统中，初始化期间到达的用户输入可能会丢失。Claude Code 会在任何异步工作开始之前从 argv 捕获初始提示，确保 `claude "fix the bug"` 不会因为初始化耗时超过预期而丢掉提示。

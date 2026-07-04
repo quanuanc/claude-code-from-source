@@ -51,6 +51,7 @@
 | singleton | 单例 |  |
 | reactive store | 响应式存储 |  |
 | sticky latch | 粘性锁存器 | 首次出现可加英文。 |
+| memoization | 记忆化 | 指缓存函数调用结果，使重复调用返回同一结果。 |
 | terminal state | 终止状态 | 不译为“终端状态”，避免与 terminal UI 混淆。 |
 | discriminated union | 判别联合 | TypeScript 语境。 |
 | lifecycle event | 生命周期事件 |  |

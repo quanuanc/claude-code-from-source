@@ -4,7 +4,7 @@
 |---|---|---|---|
 | `README.md` | 项目介绍与目录 | 完成 | 已完成初译与技术审校，输出到 `README.zh-CN.md` |
 | `book/ch01-architecture.md` | 第 1 章：AI 智能体的架构 | 完成 | 已完成初译与技术审校；作为后续章节术语与风格基准 |
-| `book/ch02-bootstrap.md` | 第 2 章：快速启动——引导流水线 | 未开始 |  |
+| `book/ch02-bootstrap.md` | 第 2 章：快速启动——引导流水线 | 完成 | 已完成初译与技术审校 |
 | `book/ch03-state.md` | 第 3 章：状态——双层架构 | 未开始 |  |
 | `book/ch04-api-layer.md` | 第 4 章：与 Claude 对话——API 层 | 未开始 |  |
 | `book/ch05-agent-loop.md` | 第 5 章：智能体循环 | 未开始 |  |
